@@ -10,7 +10,7 @@ use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 use wry::http::Response;
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, task::{Context, Poll}, time::Duration};
-use log::{debug, error};
+use log::{debug, error, trace};
 use futures_util::TryStreamExt;
 
 use crate::{backend::Backend, common::{respond_client_error, respond_status, CONTENT_TYPE_BIN, CONTENT_TYPE_TEXT}, node::{common::send_command, node::AppEnv}, types::{BackendCommand, ElectricoEvents, NETConnection, NETServer, Responder}};
@@ -170,7 +170,7 @@ pub fn process_http_command(tokio_runtime:&Runtime, _app_env:&AppEnv,
                                                     
                                                     if let Ok(r) = self.receiver.try_recv() {
                                                        if let NETConnection::Write {data, end} = r {
-                                                            debug!("NETConnection::Write:{}", end);
+                                                            trace!("NETConnection::Write:{}", end);
                                                             self.buffer = write_data(&data, buf);
                                                             self.ended=end;
                                                             return Poll::Ready(Ok(()));

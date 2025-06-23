@@ -229,7 +229,7 @@ var __electrico_nonce=null;
         file_protocol: {},
         app_menu:{},
         module_paths: {},
-        module_cache: {},
+        module_cache: new Map(),
         ipc_connected: [],
         sendChannelMessage: (channel, args, data) => {
             if (channel == "ipc_connect") {
@@ -516,6 +516,14 @@ var __electrico_nonce=null;
         for (let k in env) {
             process.env[k] = env[k];
         }
+        let importsDoneCbs = []; let importsDone=false;
+        window.__electrico.asyncImportDoneHook=()=>{
+            importsDoneCbs.forEach(cb=>{
+                cb();
+            });
+            importsDone = true;
+            importsDoneCbs = null;
+        };
         let sbuffer = new SerializationBuffer(clientid);
         let parentPort = new ProcessPort((data) => {
             let action = {"action":"PostIPC", "http_id":"fork", "from_backend":true, "request_id":data.portid!=null?data.portid:"fork", "channel":clientid, "params":"["+data.msg+"]"};
@@ -525,14 +533,22 @@ var __electrico_nonce=null;
                 ws_hook = null;
             }
             window.__ipc_websocket("ipc", false, null, ws_hook, (socket)=>{
-                let msg = (new TextEncoder()).encode(JSON.stringify(action_msg));
-                socket.send(msg);
-                if (data.data_blob!=null) {
-                    socket.send(data.data_blob);
+                let socketSend = ()=>{
+                    let msg = (new TextEncoder()).encode(JSON.stringify(action_msg));
+                    socket.send(msg);
+                    if (data.data_blob!=null) {
+                        socket.send(data.data_blob);
+                    }
+                };
+                if (importsDone) {
+                    socketSend();
+                } else {
+                    importsDoneCbs.push(socketSend);
                 }
             });
         }, sbuffer);
         parentPort.start();
+       
         /*window.__ipc_websocket("ipc", false, null, hook, (socket)=>{
             
         });*/

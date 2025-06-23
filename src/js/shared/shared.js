@@ -72,7 +72,6 @@
         }
         
         socket.onopen = (event) => {
-          console.log("onopen", event);
           ipc_websockets[channel].socket = socket;
           for (let cb of ipc_websockets[channel].cbs) {
               cb(socket);
@@ -87,10 +86,10 @@
       window.__ipc_websocket_messagehandler = function(handler) {
         let message=null;
         return function(data) {
-            if (message!=null) {
-              handler(message.channel, message.args, Buffer.from(data));
-              message=null;
-              return;
+          if (message!=null) {
+            handler(message.channel, message.args, Buffer.from(data));
+            message=null;
+            return;
           }
           let msg = (new TextDecoder()).decode(data);
           let i1 = msg.indexOf("|");

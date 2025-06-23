@@ -13,6 +13,7 @@ use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use log::{debug, error, info, trace, warn};
 use include_dir::{include_dir, Dir};
+use mime_guess::Mime;
 use reqwest::StatusCode;
 use substring::Substring;
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -93,7 +94,7 @@ impl Frontend {
 
 
     #[tokio::main]
-    pub async fn start_http_server(proxy:EventLoopProxy<ElectricoEvents>, tcp_listener:TcpListener, port:u16, protocols:Vec<String>) {
+    pub async fn start_http_server(proxy:EventLoopProxy<ElectricoEvents>, tcp_listener:TcpListener, port:u16, protocols:Vec<String>, rsrc_dir:String) {
         fn is_electrico_ipc(path:&String) -> bool {
             path.starts_with("/electrico-ipc")
         }
@@ -153,6 +154,7 @@ impl Frontend {
             let io = TokioIo::new(stream);
             let s_proxy = proxy.clone();
             let protocols = protocols.clone();
+            let rsrc_dir = rsrc_dir.clone();
             tokio::task::spawn(async move {
                 let protocols = protocols.clone();
                 let service = service_fn(|mut request:Request<hyper::body::Incoming>| {
@@ -160,6 +162,7 @@ impl Frontend {
                     let urlparts = parse_http_url_path(request.uri().path());
                     let s2_proxy = s_proxy.clone();
                     let protocols = protocols.clone();
+                    let rsrc_dir = rsrc_dir.clone();
                     return async move {
                         if let Some((http_id, protocol, url_root, url)) = urlparts {
                             trace!("http_server processing request:{http_id}, {protocol}, {url_root}, {url}");
@@ -282,14 +285,36 @@ impl Frontend {
                                             path = format!("{path}?{query}");
                                         }
                                         trace!("custom file protocol request: {}, {}", protocol, path);
-                                        let _ = s2_proxy.send_event(ElectricoEvents::ExecuteCommand {command:Command::PostIPC {
-                                            http_id,
-                                            nonce:None,
-                                            from_backend: false,
-                                            request_id:Uuid::new_v4().to_string(),
-                                            channel: format!("__electrico_protocol"),
-                                            params: format!("[\"{}\", \"{}\"]", escape(&protocol), path)
-                                        }, responder:crate::types::Responder::HttpProtocol { sender:req_sender}, data_blob:None});
+                                        let fpath;
+                                        if let Some(ix) = path.rfind("?") {
+                                            fpath = path.substring(0, ix);
+                                        } else {
+                                            fpath = path.as_str();
+                                        };
+                                        let mut as_file = false;
+                                        if fpath.starts_with(rsrc_dir.as_str()) {
+                                            if let Ok(contents) = fs::read(fpath) {
+                                                let mime_type;
+                                                if let Some(guess) = mime_guess::from_path(fpath).first() {
+                                                    mime_type = guess.essence_str().to_string();
+                                                } else {
+                                                    mime_type = format!("text/plain");
+                                                };
+                                                as_file = true;
+                                                let _ = req_sender.send(IPCResponse::new(contents, mime_type, StatusCode::OK)).await;
+                                            }
+                                        }
+                                        if !as_file {
+                                            trace!("custom file protocol request: {}, {}", protocol, fpath);
+                                            let _ = s2_proxy.send_event(ElectricoEvents::ExecuteCommand {command:Command::PostIPC {
+                                                http_id,
+                                                nonce:None,
+                                                from_backend: false,
+                                                request_id:Uuid::new_v4().to_string(),
+                                                channel: format!("__electrico_protocol"),
+                                                params: format!("[\"{}\", \"{}\"]", escape(&protocol), path)
+                                            }, responder:crate::types::Responder::HttpProtocol { sender:req_sender}, data_blob:None});
+                                        }
                                     }
                                 }
                                 if let Ok(r) = timeout(Duration::from_secs(300), req_receiver.recv()).await {
@@ -340,11 +365,12 @@ impl Frontend {
         if self.http_port==None {
             let s_proxy = proxy.clone();
             let protocols = self.file_protocols.clone();
+            let rsrc_dir = self.rsrc_dir.clone();
             let listener= TcpListener::bind("127.0.0.1:0").expect("start_http_server - TcpListener failed");
             let addr = listener.local_addr().expect("listener.local_addr failed");
             let _ = listener.set_nonblocking(true);
             thread::spawn(move || {
-                Frontend::start_http_server(s_proxy, listener, addr.port(), protocols);
+                Frontend::start_http_server(s_proxy, listener, addr.port(), protocols, rsrc_dir.as_os_str().to_str().unwrap().to_string());
             });
             self.http_port=Some(addr.port());
         }

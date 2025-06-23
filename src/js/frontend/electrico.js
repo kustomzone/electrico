@@ -192,7 +192,7 @@
         const remote_hooks = {}; 
         window.__electrico={
             module_paths: {},
-            module_cache: {},
+            module_cache: new Map(),
             channel: {},
             received_ports: {},
             add_args: [],
